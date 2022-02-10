@@ -21,7 +21,9 @@ There are a number of optional arguments that can be called when running this sc
 *--outdir* ["."], directory to save cutouts to.
 
 
+
 **Code Dependencies**
+
 The following python packages are required to run this code (version used in development):
 * numpy (1.21.4)
 * pyvo (1.2)
