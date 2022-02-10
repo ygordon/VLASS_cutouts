@@ -2,7 +2,7 @@
 
 command line script for querying CADC for VLASS images and obtaining a cutout fits files centred on the coordinates provided. Where a cutout covers multiple VLASS images, the returned cutout is a mosaic including updated WCS and beam information in the header. Run as: 
 
-    *>python3 get_VLASS_cutouts.py target_list*
+    >python get_VLASS_cutouts.py target_list
 
 where *target_list* is the filename of a table containing the right ascension and declination coordinates on which to centre the cutouts. 
 
