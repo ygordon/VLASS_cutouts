@@ -1,10 +1,12 @@
 ###code to get VLASS cutout images from CADC
 
 import numpy as np, pyvo as vo, wget, argparse
+from distutils.util import strtobool
 from astroquery.cadc import Cadc
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.io import fits
+from astropy.table import Table
 from reproject import reproject_interp
 from reproject.mosaicking import find_optimal_celestial_wcs, reproject_and_coadd
 from radio_beam import Beams
@@ -12,13 +14,8 @@ from radio_beam import Beams
 
 #########################################################################
 #########################################################################
-###test parameters
-
-tp1 = SkyCoord('14h13m13.3s +46d06m53s')
-tp2 = SkyCoord(ra=224.43667, dec=54.743889, unit='deg')
-tp3 = SkyCoord('04h34m43.3s -39d00m07s')
-tsize = 2*u.arcmin
-
+### run on command line as:
+###    > python get_VLASS_cutouts.py target_filename
 #########################################################################
 #########################################################################
 
@@ -204,11 +201,15 @@ def download_cutouts(position, size, outdir='.', epoch=1, filename=None):
     ###extract required hdu
     hdu = obtain_preferred_cutout(results_dict=results, pref_epoch=epoch)
     
+    ###add OBJECT to header
+    source_name = iau_name(ra=[position.ra.value],
+                           dec=[position.dec.value],
+                           aprec=2)[0]
+    
+    hdu[0].header['OBJECT'] = ' '.join(['VLASS', source_name])
+    
     ###save to file
     if filename is None:
-        source_name = iau_name(ra=[position.ra.value],
-                                   dec=[position.dec.value],
-                                   aprec=2)[0]
         filename = '_'.join([source_name, '-'.join(['VLASS', str(epoch)])])
         filename = '.'.join([filename, 'fits'])
     
@@ -233,14 +234,17 @@ def parse_args():
                         default="DEC", help="column name with Dec. coordinates in target file")
     parser.add_argument("--posunits", action="store", type=str,
                         default="deg,deg", help="units to assume coordinates are in if not included in target table metadata")
-    parser.add_argument("--mosaic", action="store", type=str,
-                        default="True", help="mosaic if cutout straddles multiple images")
+#    parser.add_argument("--mosaic", action="store", type=str,
+#                        default="True", help="mosaic if cutout straddles multiple images") ###need to add functionality to deactivate mosaicing
     parser.add_argument("--outdir", action="store", type=str,
                         default=".", help="directory to save files to")
     args = parser.parse_args()
     
     ###convert arg.model_psf to bool
     args.mosaic = bool(strtobool(args.mosaic))
+    
+    ###convert cutout size to Quantity
+    args.size = u.Quantity(args.size)
 
     return args
 
@@ -252,7 +256,7 @@ def parse_args():
 if __name__ == "__main__":
     ##parse command line arguments
     args = parse_args()
-    
+
     ##load data
     targets = Table.read(args.targets)
     coordinates = get_coordlist(data=targets, racol=args.racol,
