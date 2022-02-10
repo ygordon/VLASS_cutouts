@@ -8,22 +8,15 @@ where *target_list* is the filename of a table containing the right ascension an
 
 There are a number of optional arguments that can be called when running this script. These are [default values in square brackets]:
 
-*--epoch* [1], the VLASS epoch to query;
-
-*--size* ["2arcmin"], a string defining the angular size of cutout to obtain;
-
-*--racol* ["RA"], name of the RA column in the target_list file;
-
-*--decol* ["DEC"], name of the Decl. column in the target_list file;
-
-*--posunits* ["deg,deg"], units for ra,dec coordinates. If the target file contains metadata on the coordinate units then that information is used instead;
-
+*--epoch* [1], the VLASS epoch to query;\
+*--size* ["2arcmin"], a string defining the angular size of cutout to obtain;\
+*--racol* ["RA"], name of the RA column in the target_list file;\
+*--decol* ["DEC"], name of the Decl. column in the target_list file;\
+*--posunits* ["deg,deg"], units for ra,dec coordinates. If the target file contains metadata on the coordinate units then that information is used instead;\
 *--outdir* ["."], directory to save cutouts to.
 
 
-
-**Code Dependencies**
-
+**Code Dependencies**\
 The following python packages are required to run this code (version used in development):
 * numpy (1.21.4)
 * pyvo (1.2)
