@@ -1,6 +1,6 @@
 ###code to get VLASS cutout images from CADC
 
-import numpy as np, pyvo as vo, wget, argparse
+import numpy as np, pyvo as vo, wget, argparse, warnings, os
 from distutils.util import strtobool
 from astroquery.cadc import Cadc
 from astropy.coordinates import SkyCoord
@@ -10,7 +10,8 @@ from astropy.table import Table
 from reproject import reproject_interp
 from reproject.mosaicking import find_optimal_celestial_wcs, reproject_and_coadd
 from radio_beam import Beams
-
+from astropy.utils.exceptions import AstropyWarning
+warnings.simplefilter('ignore', category=AstropyWarning) ###mutes warnings in printout
 
 #########################################################################
 #########################################################################
@@ -147,7 +148,13 @@ def mosaic_2D_radio_images(hdus, common_beam=True):
                         [h['BPA'] for h in old_heads]*u.deg)
     
     if common_beam == True:
-        mbeam = image_beams.common_beam() ##finds smallest common beam
+        try:
+            mbeam = image_beams.common_beam() ##finds smallest common beam
+        except:
+            mbeam = image_beams.extrema_beams()[1] ###uses largest beam of set
+            print('')
+            print('Warning: radio_beam failed to find common beam, using largest beam from input images for mosaic')
+            print('')
     else:
         mbeam = image_beams.extrema_beams()[1] ###uses largest beam of set
     
@@ -190,10 +197,30 @@ def obtain_preferred_cutout(results_dict, pref_epoch=1):
     return hdu
     
     
-def download_cutouts(position, size, outdir='.', epoch=1, filename=None):
+def download_cutouts(position, size, outdir='.', epoch=1, filename=None,
+                     overwrite_existing=False,
+                     print_file_to_download=True):
     'take input position and cutout size to save single cutout to file'
     ###can alter preferred epoch, will be a mosaic if multiple partial cutouts returned
     outdir = trim_slash(outdir)
+    
+    ###setup file name
+    source_name = iau_name(ra=[position.ra.value],
+                           dec=[position.dec.value],
+                           aprec=2)[0]
+    if filename is None:
+        filename = '_'.join([source_name, '-'.join(['VLASS', str(epoch)])])
+        filename = '.'.join([filename, 'fits'])
+    
+    ###check if file exists
+    file_list = os.listdir(outdir)
+    if overwrite_existing==False and filename in file_list:
+        print('')
+        print('WARNING: file ' + filename + ' already exists, not redownloading data')
+        return
+    if print_file_to_download==True:
+        ###useful for identifying failed downloads
+        print('downloading ' + filename)
     
     ###obtain data
     results = VLASS_image_query(position=position, size=size)
@@ -202,19 +229,10 @@ def download_cutouts(position, size, outdir='.', epoch=1, filename=None):
     hdu = obtain_preferred_cutout(results_dict=results, pref_epoch=epoch)
     
     ###add OBJECT to header
-    source_name = iau_name(ra=[position.ra.value],
-                           dec=[position.dec.value],
-                           aprec=2)[0]
-    
     hdu[0].header['OBJECT'] = ' '.join(['VLASS', source_name])
     
     ###save to file
-    if filename is None:
-        filename = '_'.join([source_name, '-'.join(['VLASS', str(epoch)])])
-        filename = '.'.join([filename, 'fits'])
-    
     filename = '/'.join([outdir, filename])
-    
     hdu.writeto(filename)
     
     return
@@ -234,8 +252,8 @@ def parse_args():
                         default="DEC", help="column name with Dec. coordinates in target file")
     parser.add_argument("--posunits", action="store", type=str,
                         default="deg,deg", help="units to assume coordinates are in if not included in target table metadata")
-#    parser.add_argument("--mosaic", action="store", type=str,
-#                        default="True", help="mosaic if cutout straddles multiple images") ###need to add functionality to deactivate mosaicing
+    parser.add_argument("--mosaic", action="store", type=str,
+                        default="True", help="mosaic if cutout straddles multiple images") ###need to add functionality to deactivate mosaicing
     parser.add_argument("--outdir", action="store", type=str,
                         default=".", help="directory to save files to")
     args = parser.parse_args()
