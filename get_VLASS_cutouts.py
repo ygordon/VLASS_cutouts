@@ -64,25 +64,26 @@ def trim_slash(string):
     return string
     
     
-def VLASS_image_query(position, size):
+def VLASS_image_query(position, size, imcodes=['ql', 'image']):
     'query CADC for VLASS cutouts and return result'
     radius = size/2
     cadc = Cadc()
     results = cadc.get_images(position, radius, collection='VLASS')
     
     ###create meta dict for image results
-    keys = []
+    outdict = {}
     for res in results:
         head = res[0].header
-        epoch = '.'.join([head['FILNAM01'], head['FILNAM02']])
-        name = head['FILNAM05']
-        keys.append('_'.join([name, epoch]))
-        
-    outdict = {}
-    for i in range(len(keys)):
-        key = keys[i]
-        hdu = results[i]
-        outdict[key] = hdu
+        hkeylist = list(head.keys())
+        filnamecodes = [str(head[f]) for f in hkeylist if 'FILNAM' in f]
+        if 'VLASS' in head['FILNAM01']:
+            epoch = '.'.join([head['FILNAM01'], head['FILNAM02']])
+            name = head['FILNAM05']
+        else:
+            epoch = '.'.join([head['FILNAM02'], head['FILNAM03']])
+            name = head['FILNAM06']
+        if all(f in filnamecodes for f in imcodes):
+            outdict['_'.join([name, epoch])] = res
     
     return outdict
     
