@@ -4,12 +4,14 @@ import numpy as np, pyvo as vo, wget, argparse, warnings, os
 from distutils.util import strtobool
 from astroquery.cadc import Cadc
 from astropy.coordinates import SkyCoord
+from astropy.convolution import convolve_fft
 from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table
-from reproject import reproject_interp
+from spectral_cube import SpectralCube
+from reproject import reproject_exact
 from reproject.mosaicking import find_optimal_celestial_wcs, reproject_and_coadd
-from radio_beam import Beams
+import radio_beam as rb
 from astropy.utils.exceptions import AstropyWarning
 warnings.simplefilter('ignore', category=AstropyWarning) ###mutes warnings in printout
 
@@ -86,96 +88,34 @@ def VLASS_image_query(position, size, imcodes=['ql', 'image']):
             outdict['_'.join([name, epoch])] = res
     
     return outdict
-    
-    
-def reduce_4dhdu_to_2d(hdu):
-    'ensure a 4d radio image hdu is in 2D for stacking'
-    ###only use with flat images not cubes!
-    ###extract 2D image array
-    imdata = hdu[0].data
-    if imdata.ndim == 4:
-        imdata = imdata[0][0]
-    
-        ###extract header info for 2D
-        head2d = hdu[0].header.copy()
-    
-        hkeys = list(head2d.keys())
-    
-        crkeys = ['CTYPE', 'CRVAL', 'CDELT', 'CRPIX', 'CUNIT']
-        cr3 = [c + '3' for c in crkeys]
-        cr4 = [c + '4' for c in crkeys]
-        badkeys = cr3 + cr4 + ['NAXIS3', 'NAXIS4']
-    
-        for key in hkeys:
-            if 'PC3' in key or 'PC4' in key or '_3' in key or '_4' in key:
-                badkeys.append(key)
-            if 'PC03' in key or 'PC04' in key or '_03' in key or '_04' in key:
-                badkeys.append(key)
-            if key in badkeys:
-                del(head2d[key])
 
-        head2d['NAXIS'] = 2
 
-    else:
-        head2d = hdu[0].header
-
-    ###create new 2D hdu
-    hdu2d = fits.PrimaryHDU(imdata)
-    hdu2d.header = head2d
-    hdulist2d = fits.HDUList(hdu2d)
+def make_vlass_coad(inputs):
+    'make coadded VLASS image from inputs'
     
-    return(hdulist2d)
+    ###load, reduce to 2D and extract necessary info
+    cubes = [SpectralCube.read(i) for i in inputs]
+    imdat = [(i.hdu.data[0], i.wcs.dropaxis(2)) for i in cubes]
+    wcs_out, shape_out = find_optimal_celestial_wcs(imdat)
     
+    ###find common beam and convolve images with
+    beams = rb.Beams(beams = [rb.Beam.from_fits_header(i.header) for i in cubes])
+    common = rb.commonbeam.common_manybeams_mve(beams)
+    convolved = [i.convolve_to(common, convolve=convolve_fft) for i in cubes]
+    indata = [(i.hdu.data[0], i.wcs.dropaxis(2)) for i in convolved]
     
-def mosaic_2D_radio_images(hdus, common_beam=True):
-    'create optimised mosaic from multiple images including beam info'
-    ###get information from contributing headers
-    old_heads = [hdu[0].header for hdu in hdus]
+    ###coad convolved images
+    outdata, footprint = reproject_and_coadd(indata, wcs_out,
+                                             shape_out=shape_out,
+                                             reproject_function=reproject_exact)
     
-    ###set up mosaic info
-    wcs_out, shape_out = find_optimal_celestial_wcs(hdus)
+    ###make output fits hdu and write to file
+    hdu_out = fits.PrimaryHDU(outdata, header=wcs_out.to_header())
+    hdu_out.header = common.attach_to_header(hdu_out.header) ##adds beam info
+    ###add additional info to header (obs dates [median/range], comment on input images)?
+    hdu_out = fits.HDUList(hdu_out)
     
-    ###stitch together data
-    array, footprint = reproject_and_coadd(hdus, wcs_out, shape_out=shape_out,
-                                           reproject_function=reproject_interp)
-                                           
-    new_hdu = fits.PrimaryHDU(array)
-    ###update WCS in header
-    new_hdu.header.update(wcs_out.to_header())
-    
-    ###beam info
-    image_beams = Beams([h['BMAJ'] for h in old_heads]*u.deg,
-                        [h['BMIN'] for h in old_heads]*u.deg,
-                        [h['BPA'] for h in old_heads]*u.deg)
-    
-    if common_beam == True:
-        try:
-            mbeam = image_beams.common_beam() ##finds smallest common beam
-        except:
-            mbeam = image_beams.extrema_beams()[1] ###uses largest beam of set
-            print('')
-            print('Warning: radio_beam failed to find common beam, using largest beam from input images for mosaic')
-            print('')
-    else:
-        mbeam = image_beams.extrema_beams()[1] ###uses largest beam of set
-    
-    ###add to header
-    new_hdu.header.update(mbeam.to_header_keywords())
-    ###add in beam unit
-    new_hdu.header['BUNIT'] = old_heads[0]['BUNIT']
-    
-    ###filenames of contributing images
-    filenames =  ['.'.join([str(h[key]) for key in list(h.keys()) if 'FILNAM' in key]) for h in old_heads]
-    
-    ###create comment on mosaic
-    comment_1 = 'This cutout is a mosaic of the following contributing VLASS images obtained from CADC: '
-    comment_2 = ', '.join(filenames)
-    
-    new_hdu.header['COMMENT'] = ''.join([comment_1, comment_2])
-    
-    new_hdu = fits.HDUList(new_hdu)
-    
-    return new_hdu
+    return hdu_out
     
     
 def obtain_preferred_cutout(results_dict, pref_epoch=1):
@@ -187,13 +127,13 @@ def obtain_preferred_cutout(results_dict, pref_epoch=1):
     right_epoch = [key for key in keylist if epkey in key]
     
     ###sift out data
-    epoch_data = [reduce_4dhdu_to_2d(results_dict[key]) for key in keylist if key in right_epoch]
+    epoch_data = [results_dict[key] for key in keylist if key in right_epoch]
     
     ###if only one image returned then great, if more (e.g. e1.1, e1.2) stack/mosaic
     if len(epoch_data) == 1:
         hdu = epoch_data[0]
     else:
-        hdu = mosaic_2D_radio_images(epoch_data)
+        hdu = make_vlass_coad(epoch_data)
     
     return hdu
     
@@ -244,7 +184,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="download cutout fits images from VLASS")
     parser.add_argument("targets", help="file with list of sky coords to centre cutouts on")
     parser.add_argument("--epoch", action="store", type=int,
-                        default=1, help="VLASS epoch to get images of")
+                        default=2, help="VLASS epoch to get images of")
     parser.add_argument("--size", action="store", type=str,
                         default="2arcmin", help="length of side of square cutout")
     parser.add_argument("--racol", action="store", type=str,
