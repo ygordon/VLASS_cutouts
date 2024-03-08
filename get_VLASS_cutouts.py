@@ -66,10 +66,12 @@ def trim_slash(string):
     return string
     
     
-def VLASS_image_query(position, size, imcodes=['ql', 'image']):
+def VLASS_image_query(position, size, imcodes=['ql', 'image'],
+                      timeout=30):
     'query CADC for VLASS cutouts and return result'
     radius = size/2
     cadc = Cadc()
+    cadc.TIMEOUT = timeout
     results = cadc.get_images(position, radius, collection='VLASS')
     
     ###create meta dict for image results
@@ -140,7 +142,8 @@ def obtain_preferred_cutout(results_dict, pref_epoch=1):
     
 def download_cutouts(position, size, outdir='.', epoch=1, filename=None,
                      overwrite_existing=False,
-                     print_file_to_download=True):
+                     print_file_to_download=True,
+                     timeout=30):
     'take input position and cutout size to save single cutout to file'
     ###can alter preferred epoch, will be a mosaic if multiple partial cutouts returned
     outdir = trim_slash(outdir)
@@ -164,7 +167,7 @@ def download_cutouts(position, size, outdir='.', epoch=1, filename=None,
         print('downloading ' + filename)
     
     ###obtain data
-    results = VLASS_image_query(position=position, size=size)
+    results = VLASS_image_query(position=position, size=size, timeout=timeout)
     
     ###extract required hdu
     hdu = obtain_preferred_cutout(results_dict=results, pref_epoch=epoch)
@@ -197,6 +200,8 @@ def parse_args():
                         default="True", help="mosaic if cutout straddles multiple images") ###need to add functionality to deactivate mosaicing
     parser.add_argument("--outdir", action="store", type=str,
                         default=".", help="directory to save files to")
+    parser.add_argument("--timeout", action="store", type=int,
+                        default=30, help="CADC query timeout limit")
     args = parser.parse_args()
     
     ###convert arg.model_psf to bool
@@ -222,4 +227,4 @@ if __name__ == "__main__":
                                 decol=args.decol, posu=args.posunits)
     for co in coordinates:
         download_cutouts(position=co, size=args.size, outdir=args.outdir,
-                         epoch=args.epoch)
+                         epoch=args.epoch, timeout=args.timeout)
